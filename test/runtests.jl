@@ -18,7 +18,7 @@ bounds = [(-3.0, 2.0), (-1.0, 6.0)]
 lb = [-3.0, -1.0]
 ub = [2.0, 6.0]
 # xopt1, fopt1 = pso(myfunc, initial, bounds, num_particles, maxiter)
-xopt1, fopt1 = pso(myfunc, lb, ub)
+@time xopt1, fopt1 = pso(myfunc, lb, ub)
 println("The optimum is at:")
 println("    $(xopt1)")
 println("Optimal function value:")
@@ -36,7 +36,7 @@ function mycon(x)
 end
 
 # xopt2, fopt2 = pso(myfunc, initial, bounds, num_particles, maxiter)
-xopt2, fopt2 = pso(myfunc, lb, ub, f_ieqcons=mycon)
+@time xopt2, fopt2 = pso(myfunc, lb, ub, f_ieqcons=mycon)
 
 println("The optimum is at:")
 println("    $(xopt2)")
@@ -87,7 +87,7 @@ P = 66  # lb (force)
 args = (B, rho, E, P)
 lb = [10.0, 1.0, 0.01]
 ub = [30.0, 3.0, 0.25]
-xopt4, fopt4 = pso(weight, lb, ub, f_ieqcons=mycons, args=args)
+@time xopt4, fopt4 = pso(weight, lb, ub, f_ieqcons=mycons, args=args)
 
 
 println("The optimum is at:")
