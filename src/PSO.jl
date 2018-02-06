@@ -1,30 +1,35 @@
 __precompile__(true)
 
 module PSO
+    function make_constraints(::Type{Val{nothing}}, args, kwargs, debug)
+        debug && println("No constraints given.")
+        return x -> [0.0]
+    end
 
-    function pso(func::Function, lb::Vector, ub::Vector; ieqcons::Vector=[],
-                 f_ieqcons=nothing, args=(), kwargs=Dict(),
+    function make_constraints(eqs::Vector, args, kwargs, debug)
+        debug && println("Converting ieqcons to a single constraint function.")
+        return x -> [f(x, args...; kwargs...) for f in eqs]
+    end
+
+    function make_constraints(eqs::Function, args, kwargs, debug)
+        debug && println("Single constraint function given in f_ieqcons.")
+        return x -> eqs(x, args...; kwargs...)
+    end
+
+    make_constraints(eqs, args, kwargs, debug) = make_constraints(Val{eqs}, args, kwargs, debug)
+
+    # function update_position!(particle::Particle, bounds)
+    #
+    # end
+
+    function pso(func::Function, lb::Vector, ub::Vector; constraints=nothing, args=(), kwargs=Dict(),
                  swarmsize=100, omega=0.5, phip=0.5, phig=0.5, maxiter=100,
                  minstep=1e-8, minfunc=1e-8, debug=false, processes=1, particle_output=false)
         assert(length(ub) == length(lb))
         assert(all(ub .> lb))
 
         obj = x -> func(x, args...; kwargs...)
-
-        # Check for constraint function(s)
-        local cons
-        if f_ieqcons == nothing
-            if length(ieqcons) == 0
-                debug && println("No constraints given.")
-                cons = x -> [0.0]
-            else
-                debug && println("Converting ieqcons to a single constraint function.")
-                cons = x -> [f(x, args...; kwargs...) for f in ieqcons]
-            end
-        else
-            debug && println("Single constraint function given in f_ieqcons.")
-            cons = x -> f_ieqcons(x, args...; kwargs...)
-        end
+        cons = make_constraints(constraints, args, kwargs, debug)
         is_feasible = x -> all(cons(x) .>= 0)
 
         # Initialize the multiprocessing module if necessary
