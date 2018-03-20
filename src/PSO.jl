@@ -1,41 +1,37 @@
 __precompile__(true)
 
 module PSO
-    function make_constraints(::Type{Val{nothing}}, args, kwargs, debug)
-        debug && println("No constraints given.")
+    function make_constraints(::Type{Val{nothing}}, args, kwargs, verbose)
+        verbose && println("No constraints given.")
         return x -> [0.0]
     end
 
-    function make_constraints(eqs::Vector, args, kwargs, debug)
-        debug && println("Converting ieqcons to a single constraint function.")
+    function make_constraints(eqs::Vector, args, kwargs, verbose)
+        verbose && println("Converting ieqcons to a single constraint function.")
         return x -> [f(x, args...; kwargs...) for f in eqs]
     end
 
-    function make_constraints(eqs::Function, args, kwargs, debug)
-        debug && println("Single constraint function given in f_ieqcons.")
+    function make_constraints(eqs::Function, args, kwargs, verbose)
+        verbose && println("Single constraint function given in f_ieqcons.")
         return x -> eqs(x, args...; kwargs...)
     end
 
-    make_constraints(eqs, args, kwargs, debug) = make_constraints(Val{eqs}, args, kwargs, debug)
+    make_constraints(eqs, args, kwargs, verbose) = make_constraints(Val{eqs}, args, kwargs, verbose)
 
-    # function update_position!(particle::Particle, bounds)
-    #
-    # end
+    function update_position!(x, p, fx, fp, fs)
+        i_update = (fx .< fp) .& fs
+        p[i_update, :] = copy(x[i_update, :])
+        fp[i_update, :] = fx[i_update, :]
+    end
 
-    function pso(func::Function, lb::Vector, ub::Vector; constraints=nothing, args=(), kwargs=Dict(),
-                 swarmsize=100, omega=0.5, phip=0.5, phig=0.5, maxiter=100,
-                 minstep=1e-8, minfunc=1e-8, debug=false, processes=1, particle_output=false)
+    function pso(func::Function, lb::Vector, ub::Vector, constraints, args, kwargs,
+                 swarmsize, ω, ϕp, ϕg, maxiter, minstep, minfunc, verbose)
         assert(length(ub) == length(lb))
         assert(all(ub .> lb))
 
         obj = x -> func(x, args...; kwargs...)
-        cons = make_constraints(constraints, args, kwargs, debug)
+        cons = make_constraints(constraints, args, kwargs, verbose)
         is_feasible = x -> all(cons(x) .>= 0)
-
-        # Initialize the multiprocessing module if necessary
-        # if processes > 1:
-        #     import multiprocessing
-        #     mp_pool = multiprocessing.Pool(processes)
 
         # Initialize the particle swarm
         vhigh = abs.(ub .- lb)
@@ -55,15 +51,13 @@ module PSO
         fg = Inf  # best swarm position starting value
 
         # Store particle's best position (if constraints are satisfied)
-        i_update = (fx .< fp) .& fs
-        p[i_update, :] = copy(x[i_update, :])
-        fp[i_update, :] = fx[i_update, :]
+        update_position!(x, p, fx, fp, fs)
 
         # Update swarm's best position
         i_min = indmin(fp)
         if fp[i_min] < fg
-            fg = fp[i_min]
             g = copy(p[i_min, :])
+            fg = fp[i_min]
         end
 
         # Iterate until termination criterion met
@@ -72,9 +66,8 @@ module PSO
             rp = rand(S, D)
             rg = rand(S, D)
 
-            # Update the particles velocities
-            v = omega*v .+ phip*rp.*(p .- x) .+ phig*rg.*(g' .- x)
-            # Update the particles' positions
+            # Update the particles' velocities and positions
+            v = ω*v .+ ϕp*rp.*(p .- x) .+ ϕg*rg.*(g' .- x)
             x += v
             # Correct for bound violations
             maskl = x .< lb'
@@ -82,52 +75,49 @@ module PSO
             x = x.*(.~(maskl .| masku)) .+ lb'.*maskl .+ ub'.*masku
 
             # Update objectives and constraints
-            if processes > 1
-                # fx = np.array(mp_pool.map(obj, x))
-                # fs = np.array(mp_pool.map(is_feasible, x))
-            else
-                for i = 1:S
-                    fx[i] = obj(x[i, :])
-                    fs[i] = is_feasible(x[i, :])
-                end
+            for i = 1:S
+                fx[i] = obj(x[i, :])
+                fs[i] = is_feasible(x[i, :])
             end
 
             # Store particle's best position (if constraints are satisfied)
-            i_update = (fx .< fp) .& fs
-            p[i_update, :] = copy(x[i_update, :])
-            fp[i_update, :] = fx[i_update, :]
+            update_position!(x, p, fx, fp, fs)
 
             # Compare swarm's best position with global best position
             i_min = indmin(fp)
             if fp[i_min] < fg
-                debug && println("New best for swarm at iteration $(it): $(p[i_min, :]) $(fp[i_min])")
+                verbose && println("New best for swarm at iteration $(it): $(p[i_min, :]) $(fp[i_min])")
 
                 p_min = copy(p[i_min, :])
                 stepsize = √(sum((g .- p_min).^2))
 
                 if abs.(fg .- fp[i_min]) <= minfunc
-                    println("Stopping search: Swarm best objective change less than $(minfunc)")
-                    return particle_output? (p_min, fp[i_min], p, fp) : (p_min, fp[i_min])
+                    verbose && println("Stopping search: Swarm best objective change less than $(minfunc)")
+                    return (g, fg, p, fp)
                 end
                 if stepsize <= minstep
-                    println("Stopping search: Swarm best position change less than $(minstep)")
-                    return particle_output? (p_min, fp[i_min], p, fp) : (p_min, fp[i_min])
+                    verbose && println("Stopping search: Swarm best position change less than $(minstep)")
+                    return (g, fg, p, fp)
                 end
 
                 g = copy(p_min)
                 fg = fp[i_min]
             end
 
-            debug && println("Best after iteration $(it): $(g) $(fg)")
+            verbose && println("Best after iteration $(it): $(g) $(fg)")
             it += 1
         end
 
         println("Stopping search: maximum iterations reached --> $(maxiter)")
+        is_feasible(g) || print("However, the optimization couldn't find a feasible design. Sorry")
+        return (g, fg, p, fp)
+    end
 
-        if !is_feasible(g)
-            print("However, the optimization couldn't find a feasible design. Sorry")
-        end
-
+    function pso(func, lb, ub; constraints=nothing, args=(), kwargs=Dict(), swarmsize=100,
+                 omega=0.5, phip=0.5, phig=0.5, maxiter=100, minstep=1e-8, minfunc=1e-8,
+                 verbose=false, particle_output=false)
+        g, fg, p, fp = pso(func, lb, ub, constraints, args, kwargs,
+            swarmsize, omega, phip, phig, maxiter, minstep, minfunc, verbose)
         return particle_output? (g, fg, p, fp) : (g, fg)
     end
 
